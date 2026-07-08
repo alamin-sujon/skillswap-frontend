@@ -1,99 +1,196 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
-import { Button } from 'react-native-paper';
+import React, { useState } from "react";
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  Alert,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+} from "react-native";
+import { Button } from "react-native-paper";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+const API_BASE = "http://localhost:3000";
 
 const LoginScreen = ({ navigation }) => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = () => {
-    if (email && password) {
-      navigation.replace('Main');
-    } else {
-      Alert.alert('Error', 'Please enter email and password');
+  const handleLogin = async () => {
+    if (!email || !password) {
+      Alert.alert("Error", "Please enter email and password");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await response.json();
+      console.log("Login Response:", data);
+
+      if (response.ok && data.success) {
+        console.log("✅ Login Successful - Saving data & Navigating");
+
+        const { token, user } = data.data;
+
+        // Save to AsyncStorage
+        await AsyncStorage.setItem("authToken", token);
+        await AsyncStorage.setItem("userData", JSON.stringify(user));
+
+        console.log("💾 Token & User data saved to storage");
+
+        // Navigate to Main (Home page)
+        navigation.replace("Main");
+      } else {
+        Alert.alert("Login Failed", data.message || "Invalid credentials");
+      }
+    } catch (error) {
+      console.error("Login Error:", error);
+      Alert.alert("Error", "Network error. Please try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>SkillShare</Text>
-      <Text style={styles.subtitle}>Connect • Learn • Teach</Text>
-      
-      <View style={styles.form}>
-        <TextInput
-          style={styles.input}
-          placeholder="Email"
-          value={email}
-          onChangeText={setEmail}
-          keyboardType="email-address"
-          autoCapitalize="none"
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Password"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-        />
-        
-        <Button mode="contained" onPress={handleLogin} style={styles.button}>
-          Login
-        </Button>
-        
-        <TouchableOpacity onPress={() => navigation.navigate('Register')}>
-          <Text style={styles.link}>Don't have an account? Register</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      style={{ flex: 1 }}
+    >
+      <ScrollView contentContainerStyle={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Skill Swap</Text>
+          <Text style={styles.subtitle}>Exchange Skills • Grow Together</Text>
+        </View>
+
+        <View style={styles.form}>
+          <Text style={styles.formTitle}>Sign In</Text>
+
+          <TextInput
+            style={styles.input}
+            placeholder="Email Address"
+            value={email}
+            onChangeText={setEmail}
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
+
+          <TextInput
+            style={styles.input}
+            placeholder="Password"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+          />
+
+          <Button
+            mode="contained"
+            onPress={handleLogin}
+            style={styles.button}
+            disabled={loading}
+          >
+            {loading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator color="#fff" size="small" />
+                <Text style={styles.loadingText}>Logging in...</Text>
+              </View>
+            ) : (
+              "Login"
+            )}
+          </Button>
+
+          <TouchableOpacity onPress={() => navigation.navigate("Register")}>
+            <Text style={styles.link}>
+              Don't have an account?{" "}
+              <Text style={styles.linkBold}>Sign Up</Text>
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
+  // ... your styles remain the same
   container: {
-    flex: 1,
+    flexGrow: 1,
+    backgroundColor: "#F8FAF9",
+    justifyContent: "center",
     padding: 20,
-    justifyContent: 'center',
-    backgroundColor: '#f8f9fa',
+  },
+  header: {
+    alignItems: "center",
+    marginBottom: 40,
   },
   title: {
     fontSize: 42,
-    fontWeight: 'bold',
-    color: '#0066cc',
-    textAlign: 'center',
-    marginBottom: 8,
+    fontWeight: "800",
+    color: "#2D6A4F",
   },
   subtitle: {
-    fontSize: 18,
-    textAlign: 'center',
-    color: '#666',
-    marginBottom: 40,
+    fontSize: 15,
+    color: "#6B8F71",
+    marginTop: 6,
   },
   form: {
-    backgroundColor: 'white',
-    padding: 20,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    backgroundColor: "#FFFFFF",
+    padding: 24,
+    borderRadius: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  formTitle: {
+    fontSize: 22,
+    fontWeight: "600",
+    color: "#1A2E25",
+    textAlign: "center",
+    marginBottom: 24,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    padding: 15,
-    borderRadius: 8,
-    marginBottom: 15,
-    fontSize: 16,
+    borderColor: "#E0EBE5",
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 16,
+    fontSize: 15,
+    backgroundColor: "#F8FAF9",
   },
   button: {
     marginTop: 10,
-    paddingVertical: 6,
+    borderRadius: 12,
+    height: 52,
+  },
+  loadingContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  loadingText: {
+    color: "#fff",
+    marginLeft: 10,
+    fontSize: 15,
   },
   link: {
-    textAlign: 'center',
-    marginTop: 20,
-    color: '#0066cc',
+    textAlign: "center",
+    marginTop: 24,
+    fontSize: 14.5,
+    color: "#6B8F71",
+  },
+  linkBold: {
+    color: "#2D6A4F",
+    fontWeight: "700",
   },
 });
 
