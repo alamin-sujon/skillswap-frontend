@@ -12,6 +12,7 @@ import {
   Platform,
 } from "react-native";
 import { Button } from "react-native-paper";
+import Toast from "react-native-toast-message";
 
 const API_BASE = "http://localhost:3000";
 
@@ -44,20 +45,22 @@ const RegisterScreen = ({ navigation }) => {
       console.log("Register Response:", data);
 
       if (response.ok) {
-        Alert.alert("Success", "Account created successfully!", [
-          {
-            text: "Go to Login",
-            onPress: () => navigation.replace("Login"), // Changed to replace
-          },
-        ]);
+        Toast.show({
+          type: 'success',
+          text1: 'Registration Successful',
+          text2: 'Your account has been created successfully!',
+        });
       } else {
         const errorMessage =
           data.message || data.error || "Registration failed";
         Alert.alert("Registration Failed", errorMessage);
       }
     } catch (error) {
-      console.error("Register Error:", error);
-      Alert.alert("Error", "Network error. Please try again.");
+      Toast.show({
+        type: 'error',
+        text1: 'Registration Failed',
+        text2: 'Unable to create your account. Please try again.',
+      });
     } finally {
       setLoading(false);
     }

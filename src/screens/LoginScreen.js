@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { Button } from "react-native-paper";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import Toast from "react-native-toast-message";
 const API_BASE = "http://localhost:3000";
 
 const LoginScreen = ({ navigation }) => {
@@ -48,10 +49,19 @@ const LoginScreen = ({ navigation }) => {
 
         console.log("💾 Token & User data saved to storage");
 
+        Toast.show({
+          type: 'success',
+          text1: 'Login Successful',
+          text2: 'Welcome back!',
+        });
         // Navigate to Main (Home page)
         navigation.replace("Main");
       } else {
-        Alert.alert("Login Failed", data.message || "Invalid credentials");
+        Toast.show({
+          type: 'error',
+          text1: 'Login Failed',
+          text2: 'Invalid email or password.',
+        });
       }
     } catch (error) {
       console.error("Login Error:", error);

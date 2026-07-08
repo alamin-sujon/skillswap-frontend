@@ -14,6 +14,7 @@ import SessionsScreen from "./src/screens/SessionsScreen";
 import MessagesScreen from "./src/screens/MessagesScreen";
 import SkillPostDetailScreen from "./src/screens/SkillPostDetailScreen";
 import ConversationScreen from "./src/screens/ConversationScreen";
+import Toast from "react-native-toast-message";
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -101,6 +102,7 @@ export default function App() {
           />
         </Stack.Navigator>
       </NavigationContainer>
+       <Toast />
     </PaperProvider>
   );
 }

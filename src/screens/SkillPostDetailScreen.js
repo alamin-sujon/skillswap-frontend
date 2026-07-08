@@ -1,237 +1,396 @@
-import React from "react";
-import { View, Text, StyleSheet, ScrollView, Image } from "react-native";
-import { Button, Card } from "react-native-paper";
+import React, { useEffect, useState, useCallback } from "react";
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  StyleSheet,
+  Image,
+  ActivityIndicator,
+  Alert,
+} from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Alert } from "react-native";
-const SkillPostDetailScreen = ({ route, navigation }) => {
-  const { post } = route.params;
-  // console.log({ post });
+import Toast from "react-native-toast-message";
 
-  const handleMatch = async () => {
+const API_BASE = "http://localhost:3000";
+
+const MatchesScreen = ({ navigation }) => {
+  const [matches, setMatches] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [processingId, setProcessingId] = useState(null);
+  const [currentUserId, setCurrentUserId] = useState(null);
+
+  // Load current user ID
+  const loadCurrentUser = async () => {
     try {
       const userDataStr = await AsyncStorage.getItem("userData");
-      const currentUser = userDataStr ? JSON.parse(userDataStr) : null;
-
-      const currentUserId = currentUser?.id; // adjust if your shape differs
-      const postOwnerId = post?.userId;
-      console.log({ currentUserId, postOwnerId });
-      if (!currentUserId) {
-        Alert.alert("Error", "Please login again.");
-        return;
+      if (userDataStr) {
+        const userData = JSON.parse(userDataStr);
+        setCurrentUserId(userData?.id);
       }
-
-      if (currentUserId === postOwnerId) {
-        Alert.alert(
-          "Not allowed",
-          "You can’t send a request to your own skill post.",
-        );
-        return;
-      }
-
-      const payload = { skillPostId: post.id };
-
-      // create match request
-      await fetch(`${YOUR_API_BASE_URL}/matches`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          // "Authorization": `Bearer ${token}`, // if your backend requires it
-        },
-        body: JSON.stringify(payload),
-      });
-
-      Alert.alert("Match request sent! Check Matches tab.");
-      navigation.navigate("Matches");
-    } catch (e) {
-      Alert.alert("Error", "Something went wrong.");
+    } catch (error) {
+      console.log("Error loading current user:", error);
     }
   };
-  const isTeach = post?.type === "TEACH";
 
-  return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerOverlay} />
-        <Image source={{ uri: post?.user?.avatarUrl }} style={styles.avatar} />
-        <Text style={styles.name}>{post?.user?.fullName}</Text>
-        <Text style={styles.title}>{post?.title}</Text>
+  const getToken = async () => {
+    return await AsyncStorage.getItem("authToken");
+  };
 
-        <View style={styles.metaRow}>
-          <View style={styles.metaChip}>
-            <Text style={styles.metaChipText}>{post?.category}</Text>
-          </View>
-          <View
-            style={[
-              styles.metaChip,
-              isTeach ? styles.teachChip : styles.learnChip,
-            ]}
-          >
-            <Text style={styles.metaChipText}>
-              {isTeach ? "Wants to Learn" : "Wants to Teach"}
-            </Text>
-          </View>
+  const loadMatches = useCallback(async () => {
+    try {
+      setLoading(true);
+      const token = await getToken();
+
+      if (!token) {
+        Toast.show({
+          type: "error",
+          text1: "Authentication Error",
+          text2: "Please login again.",
+        });
+        return;
+      }
+
+      const response = await fetch(`${API_BASE}/matches`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        Toast.show({
+          type: "error",
+          text1: "Error",
+          text2: data.message || "Failed to load matches.",
+        });
+        setMatches([]);
+        return;
+      }
+
+      setMatches(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.log("Load Matches Error:", error);
+      Toast.show({
+        type: "error",
+        text1: "Network Error",
+        text2: "Unable to load matches.",
+      });
+      setMatches([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCurrentUser();
+    loadMatches();
+  }, [loadMatches]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadMatches();
+  };
+
+  // Accept Match
+  const handleAccept = async (matchId) => {
+    Alert.alert("Accept Match", "Are you sure you want to accept this match?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Accept",
+        onPress: async () => {
+          setProcessingId(matchId);
+          try {
+            const token = await getToken();
+            const response = await fetch(`${API_BASE}/matches/${matchId}/accept`, {
+              method: "PATCH",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+            });
+
+            if (response.ok) {
+              Toast.show({
+                type: "success",
+                text1: "Success",
+                text2: "Match accepted! 🎉",
+              });
+              loadMatches();
+            } else {
+              const errorData = await response.json();
+              Toast.show({
+                type: "error",
+                text1: "Failed",
+                text2: errorData.message || "Could not accept match.",
+              });
+            }
+          } catch (error) {
+            Toast.show({
+              type: "error",
+              text1: "Error",
+              text2: "Something went wrong.",
+            });
+          } finally {
+            setProcessingId(null);
+          }
+        },
+      },
+    ]);
+  };
+
+  // Reject Match
+  const handleReject = async (matchId) => {
+    Alert.alert("Reject Match", "Are you sure you want to reject this match?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Reject",
+        style: "destructive",
+        onPress: async () => {
+          setProcessingId(matchId);
+          try {
+            const token = await getToken();
+            const response = await fetch(`${API_BASE}/matches/${matchId}/reject`, {
+              method: "PATCH",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+            });
+
+            if (response.ok) {
+              Toast.show({
+                type: "success",
+                text1: "Rejected",
+                text2: "Match has been rejected.",
+              });
+              loadMatches();
+            } else {
+              const errorData = await response.json();
+              Toast.show({
+                type: "error",
+                text1: "Failed",
+                text2: errorData.message || "Could not reject match.",
+              });
+            }
+          } catch (error) {
+            Toast.show({
+              type: "error",
+              text1: "Error",
+              text2: "Something went wrong.",
+            });
+          } finally {
+            setProcessingId(null);
+          }
+        },
+      },
+    ]);
+  };
+
+  const renderMatch = ({ item }) => {
+    const isPending = item.status?.toLowerCase() === "pending";
+    const isProcessing = processingId === item.id;
+
+    // Show Accept/Reject only if current user is userB (the receiver)
+    const canRespond = currentUserId && item.userBId === currentUserId;
+
+    return (
+      <View style={styles.card}>
+        <Image
+          source={{
+            uri: item?.userB?.avatarUrl || "https://via.placeholder.com/80",
+          }}
+          style={styles.avatar}
+        />
+
+        <View style={styles.info}>
+          <Text style={styles.name}>
+            {item?.userB?.fullName || "Unknown User"}
+          </Text>
+
+          <Text style={styles.skill}>
+            {item?.skillPost?.title || "No Skill"}
+          </Text>
+
+          <Text style={styles.status}>
+            Status: {item?.status || "Pending"}
+          </Text>
+
+          {isPending && canRespond && (
+            <View style={styles.actionButtons}>
+              <TouchableOpacity
+                style={[styles.button, styles.acceptButton]}
+                onPress={() => handleAccept(item.id)}
+                disabled={isProcessing}
+              >
+                <Text style={styles.buttonText}>
+                  {isProcessing ? "Processing..." : "✅ Accept"}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.button, styles.rejectButton]}
+                onPress={() => handleReject(item.id)}
+                disabled={isProcessing}
+              >
+                <Text style={styles.buttonText}>❌ Reject</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Show chat button for accepted matches or if user is not the receiver */}
+          {!isPending && (
+            <TouchableOpacity
+              style={styles.chatButton}
+              onPress={() =>
+                navigation.navigate("Conversation", {
+                  conversationId: item.conversationId,
+                })
+              }
+            >
+              <Text style={styles.chatButtonText}>💬 Open Chat</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
+    );
+  };
 
-      {/* Card */}
-      <Card style={styles.card} mode="elevated">
-        <Card.Content>
-          <Text style={styles.sectionTitle}>About this skill</Text>
-          <Text style={styles.description}>{post?.description}</Text>
-
-          <Text style={styles.sectionTitle}>Category</Text>
-          <Text style={styles.bodyText}>{post?.category}</Text>
-
-          <Text style={styles.sectionTitle}>Tags</Text>
-          <View style={styles.tags}>
-            {(post?.tags || []).map((tag, i) => (
-              <View key={i} style={styles.tagPill}>
-                <Text style={styles.tagText}>#{tag}</Text>
-              </View>
-            ))}
-          </View>
-        </Card.Content>
-      </Card>
-
-      {/* CTA */}
-      <View style={styles.ctaWrap}>
-        <Button
-          mode="contained"
-          onPress={handleMatch}
-          style={[
-            styles.button,
-            isTeach ? styles.buttonLearn : styles.buttonTeach,
-          ]}
-          contentStyle={styles.buttonContent}
-          labelStyle={styles.buttonLabel}
-        >
-          {isTeach ? "Request to Learn" : "Offer to Teach"}
-        </Button>
-
-        <Text style={styles.ctaHint}>
-          A message will be sent to coordinate next steps.
-        </Text>
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#2563EB" />
+        <Text style={{ marginTop: 10 }}>Loading Matches...</Text>
       </View>
+    );
+  }
 
-      <View style={{ height: 24 }} />
-    </ScrollView>
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Your Matches</Text>
+
+      <FlatList
+        data={matches}
+        keyExtractor={(item) => item.id.toString()}
+        renderItem={renderMatch}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Text style={styles.emptyTitle}>No Matches Yet</Text>
+            <Text style={styles.emptyText}>
+              Browse skill posts and send a request to connect.
+            </Text>
+          </View>
+        }
+      />
+    </View>
   );
 };
 
+export default MatchesScreen;
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F7F9FC" },
-  content: { padding: 16 },
-
-  header: {
-    backgroundColor: "#ffffff",
-    borderRadius: 18,
-    padding: 18,
-    paddingBottom: 22,
-    overflow: "hidden",
-    marginBottom: 14,
-    // subtle border look
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.04)",
-  },
-  headerOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(25, 118, 210, 0.08)", // soft blue tint
-  },
-
-  avatar: {
-    width: 92,
-    height: 92,
-    borderRadius: 46,
-    alignSelf: "center",
-    marginTop: 6,
-    marginBottom: 10,
-    borderWidth: 3,
-    borderColor: "rgba(255,255,255,0.95)",
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 6,
-  },
-
-  name: {
-    textAlign: "center",
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#0F172A",
+  container: {
+    flex: 1,
+    backgroundColor: "#F4F6F9",
+    padding: 16,
   },
   title: {
-    textAlign: "center",
-    fontSize: 22,
-    fontWeight: "700",
-    marginTop: 6,
+    fontSize: 26,
+    fontWeight: "bold",
+    marginBottom: 20,
     color: "#111827",
   },
-
-  metaRow: {
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 10,
-    marginTop: 14,
-    flexWrap: "wrap",
-  },
-  metaChip: {
-    backgroundColor: "#EEF2FF",
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-  },
-  teachChip: { backgroundColor: "rgba(34, 197, 94, 0.12)" },
-  learnChip: { backgroundColor: "rgba(59, 130, 246, 0.12)" },
-  metaChipText: { color: "#334155", fontWeight: "700", fontSize: 13 },
-
   card: {
-    borderRadius: 16,
-    overflow: "hidden",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 15,
+    marginBottom: 14,
+    flexDirection: "row",
+    elevation: 2,
   },
-
-  sectionTitle: {
-    fontWeight: "800",
-    fontSize: 15,
-    marginTop: 6,
-    marginBottom: 8,
+  avatar: {
+    width: 65,
+    height: 65,
+    borderRadius: 32,
+    backgroundColor: "#ddd",
+  },
+  info: {
+    flex: 1,
+    marginLeft: 15,
+  },
+  name: {
+    fontSize: 18,
+    fontWeight: "700",
     color: "#111827",
   },
-  description: {
-    lineHeight: 22,
-    color: "#334155",
+  skill: {
+    marginTop: 4,
+    color: "#6B7280",
     fontSize: 15,
   },
-  bodyText: { color: "#334155", fontSize: 15, marginBottom: 6 },
-
-  tags: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  tagPill: {
-    backgroundColor: "rgba(14, 165, 233, 0.10)",
-    paddingVertical: 7,
-    paddingHorizontal: 10,
-    borderRadius: 999,
+  status: {
+    marginTop: 6,
+    color: "#16A34A",
+    fontWeight: "600",
   },
-  tagText: { color: "#0284C7", fontWeight: "800", fontSize: 13 },
-
-  ctaWrap: { marginTop: 14, alignItems: "center" },
+  actionButtons: {
+    flexDirection: "row",
+    marginTop: 12,
+    gap: 10,
+  },
   button: {
-    width: "100%",
-    borderRadius: 12,
-    paddingVertical: 3,
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: "center",
   },
-  buttonContent: { height: 48 },
-  buttonLabel: { fontWeight: "900", fontSize: 16 },
-
-  buttonLearn: { backgroundColor: "#2563EB" },
-  buttonTeach: { backgroundColor: "#16A34A" },
-
-  ctaHint: {
+  acceptButton: {
+    backgroundColor: "#16A34A",
+  },
+  rejectButton: {
+    backgroundColor: "#EF4444",
+  },
+  buttonText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 15,
+  },
+  chatButton: {
+    marginTop: 12,
+    backgroundColor: "#2563EB",
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  chatButtonText: {
+    color: "#fff",
+    fontWeight: "600",
+  },
+  center: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  empty: {
+    alignItems: "center",
+    marginTop: 100,
+  },
+  emptyTitle: {
+    fontSize: 22,
+    fontWeight: "bold",
+    color: "#374151",
+  },
+  emptyText: {
     marginTop: 10,
-    color: "rgba(15, 23, 42, 0.65)",
-    fontSize: 12,
+    color: "#6B7280",
     textAlign: "center",
+    fontSize: 15,
   },
 });
-
-export default SkillPostDetailScreen;
