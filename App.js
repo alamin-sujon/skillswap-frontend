@@ -15,6 +15,10 @@ import MessagesScreen from "./src/screens/MessagesScreen";
 import SkillPostDetailScreen from "./src/screens/SkillPostDetailScreen";
 import ConversationScreen from "./src/screens/ConversationScreen";
 import Toast from "react-native-toast-message";
+import MySkillPostScreen from "./src/screens/MySkillPostScreen";
+import SkillPostDetail from "./src/screens/SkillPostDetail";
+import MyMatchesScreen from "./src/screens/MyMatchesScreen";
+import MySessionsScreen from "./src/screens/MySessionsScreen";
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -48,12 +52,12 @@ function MainTabs() {
       />
       <Tab.Screen
         name="Matches"
-        component={MatchesScreen}
+        component={MyMatchesScreen}
         options={{ headerShown: false }}
       />
       <Tab.Screen
         name="Sessions"
-        component={SessionsScreen}
+        component={MySessionsScreen}
         options={{ headerShown: false }}
       />
       <Tab.Screen
@@ -90,19 +94,23 @@ export default function App() {
             component={MainTabs}
             options={{ headerShown: false }}
           />
-          <Stack.Screen
+          {/* <Stack.Screen
             name="SkillPostDetail"
             component={SkillPostDetailScreen}
             options={{ title: "Skill Details" }}
-          />
+          /> */}
           <Stack.Screen
             name="Conversation"
             component={ConversationScreen}
             options={{ title: "Chat" }}
           />
+          <Stack.Screen name="MySkillPost" component={MySkillPostScreen} />
+          <Stack.Screen name="SkillPostDetail" component={SkillPostDetail} />
+          <Stack.Screen name="MyMatches" component={MyMatchesScreen} />
+          <Stack.Screen name="MySessions" component={MySessionsScreen} />
         </Stack.Navigator>
       </NavigationContainer>
-       <Toast />
+      <Toast />
     </PaperProvider>
   );
 }

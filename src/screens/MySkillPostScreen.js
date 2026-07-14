@@ -5,20 +5,21 @@ import {
   FlatList,
   TouchableOpacity,
   StyleSheet,
+  Image,
   ActivityIndicator,
   RefreshControl,
+  Alert,
 } from "react-native";
-import { Card, Searchbar, Button, Surface, FAB } from "react-native-paper";
+import { Card, Button, Surface, FAB } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons";
 
-const API_BASE = "http://localhost:8081"; // Update with your actual API base
+const API_BASE = "http://localhost:3000";
 
 const MySkillPostScreen = ({ navigation }) => {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
-  const [searchQuery, setSearchQuery] = useState("");
 
   const fetchMySkills = async (isRefresh = false) => {
     try {
@@ -26,6 +27,7 @@ const MySkillPostScreen = ({ navigation }) => {
       else setRefreshing(true);
 
       const token = localStorage.getItem("authToken");
+      if (!token) throw new Error("No authentication token found.");
 
       const response = await fetch(`${API_BASE}/skills/my`, {
         method: "GET",
@@ -39,9 +41,10 @@ const MySkillPostScreen = ({ navigation }) => {
 
       const data = await response.json();
       setPosts(Array.isArray(data) ? data : []);
+      setError(null);
     } catch (err) {
-      setError(err.message);
       console.error(err);
+      setError(err.message);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -54,99 +57,170 @@ const MySkillPostScreen = ({ navigation }) => {
 
   const onRefresh = () => fetchMySkills(true);
 
-  const filteredPosts = posts.filter(
-    (post) =>
-      post.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      post.description?.toLowerCase().includes(searchQuery.toLowerCase()),
-  );
+  const handleDelete = async (skillId) => {
+    try {
+      const token = localStorage.getItem("authToken");
 
+      if (!token) {
+        Toast.show({
+          type: "error",
+          text1: "Authentication Error",
+          text2: "Please login again",
+        });
+        return;
+      }
+
+      console.log(`🗑️ Deleting skill with ID: ${skillId}`);
+
+      const response = await fetch(`${API_BASE}/skills/${skillId}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      console.log({ response });
+      if (response.ok) {
+        setPosts((prev) => prev.filter((p) => p.id !== skillId));
+
+        Toast.show({
+          type: "success",
+          text1: "Deleted",
+          text2: "Skill deleted successfully.",
+        });
+
+        setTimeout(() => fetchMySkills(true), 600);
+      } else {
+        Toast.show({
+          type: "error",
+          text1: "Delete Failed",
+          text2: "Failed to delete skill.",
+        });
+      }
+    } catch (err) {
+      console.error(err);
+
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: "Could not delete skill.",
+      });
+    }
+  };
   const renderPost = ({ item }) => (
-    <TouchableOpacity
-      onPress={() => navigation.navigate("SkillPostDetail", { post: item })}
-    >
-      <Surface style={styles.card} elevation={3}>
-        <Card.Content>
-          <View style={styles.typeContainer}>
-            <View
-              style={[
-                styles.typeBadge,
-                {
-                  backgroundColor:
-                    item.type === "TEACH" ? "#22c55e" : "#f59e0b",
-                },
-              ]}
-            >
-              <Text style={styles.typeText}>{item.type}</Text>
+    <Surface style={styles.card} elevation={4}>
+      <Card.Content style={styles.cardContent}>
+        <View style={styles.header}>
+          <Image
+            source={{
+              uri: item.user?.avatarUrl || "https://via.placeholder.com/52",
+            }}
+            style={styles.avatar}
+          />
+          <View style={styles.userInfo}>
+            <Text style={styles.name}>{item.user?.displayName || "You"}</Text>
+            <Text style={styles.category}>{item.category}</Text>
+          </View>
+
+          <View
+            style={[
+              styles.typeBadge,
+              {
+                backgroundColor: item.type === "TEACH" ? "#22c55e" : "#f59e0b",
+              },
+            ]}
+          >
+            <Text style={styles.typeText}>{item.type}</Text>
+          </View>
+        </View>
+
+        <Text style={styles.title}>{item.title}</Text>
+        <Text style={styles.description} numberOfLines={3}>
+          {item.description}
+        </Text>
+
+        <View style={styles.tags}>
+          {item.tags?.slice(0, 3).map((tag, index) => (
+            <View key={index} style={styles.tag}>
+              <Text style={styles.tagText}>#{tag}</Text>
             </View>
-          </View>
+          ))}
+        </View>
+      </Card.Content>
 
-          <Text style={styles.title}>{item.title}</Text>
-          <Text style={styles.description} numberOfLines={3}>
-            {item.description}
-          </Text>
+      <Card.Actions style={styles.cardActions}>
+        <Button
+          mode="contained"
+          buttonColor="#4f46e5"
+          textColor="white"
+          onPress={() => navigation.navigate("SkillPostDetail", { post: item })}
+          style={styles.viewButton}
+        >
+          View Details
+        </Button>
 
-          <View style={styles.tags}>
-            {item.tags?.slice(0, 3).map((tag, i) => (
-              <Text key={i} style={styles.tag}>
-                #{tag}
-              </Text>
-            ))}
-          </View>
-        </Card.Content>
-      </Surface>
-    </TouchableOpacity>
+        <Button
+          mode="outlined"
+          textColor="#ef4444"
+          onPress={() => handleDelete(item.id)}
+          style={styles.deleteButton}
+        >
+          Delete
+        </Button>
+      </Card.Actions>
+    </Surface>
   );
 
-  if (loading) {
+  if (loading && !refreshing) {
     return (
-      <View style={styles.center}>
+      <View style={styles.centerContainer}>
         <ActivityIndicator size="large" color="#4f46e5" />
+        <Text style={styles.loadingText}>Loading your skills...</Text>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.screenTitle}>My Skill Posts</Text>
-        <Searchbar
-          placeholder="Search my posts..."
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          style={styles.searchbar}
-        />
+      <View style={styles.topHeader}>
+        <Text style={styles.appTitle}>My Skill Posts</Text>
       </View>
 
       <FlatList
-        data={filteredPosts}
+        data={posts}
         renderItem={renderPost}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => item.id?.toString()}
+        contentContainerStyle={styles.list}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={["#4f46e5"]}
+          />
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Ionicons name="book-outline" size={80} color="#cbd5e1" />
-            <Text style={styles.emptyTitle}>No Skills Yet</Text>
-            <Text style={styles.emptySubtitle}>
-              You haven't created any skill posts yet.
+            <Ionicons name="book-outline" size={60} color="#cbd5e1" />
+            <Text style={styles.emptyText}>
+              {error ? error : "You haven't posted any skills yet."}
             </Text>
             <Button
               mode="contained"
-              onPress={() => navigation.navigate("CreateSkill")}
-              style={styles.createBtn}
+              buttonColor="#4f46e5"
+              onPress={() => navigation.goBack()}
+              style={{ marginTop: 20 }}
             >
-              Create Your First Skill
+              Browse All Skills
             </Button>
           </View>
         }
-        contentContainerStyle={styles.list}
       />
 
       <FAB
         icon="plus"
         style={styles.fab}
-        onPress={() => navigation.navigate("CreateSkill")}
+        color="white"
+        onPress={() => navigation.navigate("Home")}
       />
     </View>
   );
@@ -154,35 +228,73 @@ const MySkillPostScreen = ({ navigation }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f8fafc" },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  header: { padding: 20, backgroundColor: "white" },
-  screenTitle: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#1e2937",
-    marginBottom: 12,
+  centerContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#f8fafc",
   },
-  searchbar: { borderRadius: 12 },
-
+  topHeader: {
+    padding: 20,
+    backgroundColor: "white",
+    borderBottomWidth: 1,
+    borderBottomColor: "#e2e8f0",
+  },
+  appTitle: {
+    fontSize: 28,
+    fontWeight: "700",
+    color: "#4f46e5",
+  },
   list: { padding: 16 },
-  card: { marginBottom: 16, borderRadius: 16 },
+  card: {
+    marginBottom: 18,
+    borderRadius: 20,
+    overflow: "hidden",
+    backgroundColor: "white",
+  },
+  cardContent: { padding: 20 },
+  header: { flexDirection: "row", alignItems: "center", marginBottom: 16 },
+  avatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    marginRight: 14,
+    borderWidth: 3,
+    borderColor: "#e0e7ff",
+  },
+  userInfo: { flex: 1 },
+  name: { fontSize: 17, fontWeight: "700", color: "#1e2937" },
+  category: { color: "#64748b", fontSize: 13.5, marginTop: 2 },
 
-  typeContainer: { alignItems: "flex-end", marginBottom: 8 },
-  typeBadge: { paddingHorizontal: 14, paddingVertical: 5, borderRadius: 20 },
-  typeText: { color: "white", fontWeight: "600", fontSize: 13 },
+  typeBadge: { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 20 },
+  typeText: { color: "white", fontSize: 13, fontWeight: "700" },
 
-  title: { fontSize: 18, fontWeight: "700", marginBottom: 8 },
-  description: { color: "#475569", marginBottom: 12, lineHeight: 20 },
+  title: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#1e2937",
+    marginBottom: 10,
+    lineHeight: 26,
+  },
+  description: { color: "#475569", lineHeight: 22, marginBottom: 16 },
 
-  tags: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  tags: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   tag: {
     backgroundColor: "#e0e7ff",
-    color: "#4f46e5",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    fontSize: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
   },
+  tagText: { color: "#4f46e5", fontSize: 13, fontWeight: "500" },
+
+  cardActions: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    flexDirection: "row",
+    gap: 12,
+  },
+  viewButton: { flex: 1, borderRadius: 12 },
+  deleteButton: { flex: 1, borderRadius: 12 },
 
   emptyContainer: {
     flex: 1,
@@ -190,24 +302,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingTop: 100,
   },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: "600",
+  emptyText: {
+    fontSize: 17,
     color: "#64748b",
+    textAlign: "center",
     marginTop: 16,
   },
-  emptySubtitle: {
-    color: "#94a3b8",
-    textAlign: "center",
-    marginTop: 8,
-    paddingHorizontal: 40,
-  },
-  createBtn: { marginTop: 20, borderRadius: 12 },
+  loadingText: { marginTop: 16, color: "#4f46e5", fontSize: 16 },
 
   fab: {
     position: "absolute",
-    right: 20,
-    bottom: 20,
+    margin: 16,
+    right: 0,
+    bottom: 0,
     backgroundColor: "#4f46e5",
   },
 });

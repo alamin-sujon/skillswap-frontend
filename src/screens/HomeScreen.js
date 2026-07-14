@@ -14,6 +14,8 @@ import {
 } from "react-native";
 import { Card, Searchbar, Button, Surface, FAB } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import Toast from "react-native-toast-message";
 
 const API_BASE = "http://localhost:3000";
 
@@ -25,7 +27,14 @@ const HomeScreen = ({ navigation }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState("ALL");
 
-  // Modal & Form State
+  // Notification States
+  const [notifications, setNotifications] = useState([]);
+  const [notificationModalVisible, setNotificationModalVisible] =
+    useState(false);
+  const [notifLoading, setNotifLoading] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Create Skill Modal State
   const [modalVisible, setModalVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -39,12 +48,71 @@ const HomeScreen = ({ navigation }) => {
     preferredFormat: "ONLINE",
   });
 
+  // ==================== NOTIFICATIONS ====================
+  const fetchNotifications = async () => {
+    try {
+      setNotifLoading(true);
+      const token = await AsyncStorage.getItem("authToken");
+      if (!token) return;
+
+      const response = await fetch(`${API_BASE}/notifications`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) throw new Error("Failed to fetch notifications");
+
+      const data = await response.json();
+      setNotifications(Array.isArray(data) ? data : []);
+
+      const unread = data.filter((n) => !n.isRead).length;
+      setUnreadCount(unread);
+    } catch (err) {
+      console.error("Notifications fetch error:", err);
+    } finally {
+      setNotifLoading(false);
+    }
+  };
+
+  const markAllAsRead = async () => {
+    try {
+      const token = await AsyncStorage.getItem("authToken");
+      if (!token) return;
+
+      const response = await fetch(`${API_BASE}/notifications/read-all`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        setNotifications((prev) =>
+          prev.map((notif) => ({ ...notif, isRead: true })),
+        );
+        setUnreadCount(0);
+        Toast.show({
+          type: "success",
+          text1: "All notifications marked as read",
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      Toast.show({ type: "error", text1: "Failed to mark as read" });
+    }
+  };
+
+  // Poll notifications every 10 seconds
+  useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ==================== FETCH SKILLS ====================
   const fetchSkills = async (isRefresh = false) => {
     try {
       if (!isRefresh) setLoading(true);
       else setRefreshing(true);
 
-      const token = localStorage.getItem("authToken");
+      const token = await AsyncStorage.getItem("authToken");
       if (!token) throw new Error("No authentication token found.");
 
       const response = await fetch(`${API_BASE}/skills`, {
@@ -96,8 +164,8 @@ const HomeScreen = ({ navigation }) => {
     }
 
     setSubmitting(true);
+    const token = await AsyncStorage.getItem("authToken");
 
-    const token = localStorage.getItem("authToken");
     if (!token) {
       alert("Please login again");
       setSubmitting(false);
@@ -112,7 +180,7 @@ const HomeScreen = ({ navigation }) => {
       : [];
 
     const newSkill = {
-      id: `temp_${Date.now()}`, // temporary id
+      id: `temp_${Date.now()}`,
       type: formData.type,
       title: formData.title.trim(),
       category: formData.category.trim(),
@@ -120,12 +188,11 @@ const HomeScreen = ({ navigation }) => {
       tags: tagsArray,
       availability: formData.availability?.trim() || "",
       preferredFormat: formData.preferredFormat,
-      user: { displayName: "You", avatarUrl: "" }, // placeholder
+      user: { displayName: "You", avatarUrl: "" },
       createdAt: new Date().toISOString(),
     };
 
     try {
-      // Optimistic Update - Add immediately
       setPosts((prev) => [newSkill, ...prev]);
 
       const response = await fetch(`${API_BASE}/skills`, {
@@ -146,14 +213,11 @@ const HomeScreen = ({ navigation }) => {
       });
 
       if (!response.ok) {
-        // Revert on failure
         setPosts((prev) => prev.filter((p) => p.id !== newSkill.id));
-        throw new Error("Failed to save skill on server");
+        throw new Error("Failed to save skill");
       }
 
       alert("Skill created successfully!");
-
-      // Close modal & reset form
       setModalVisible(false);
       setFormData({
         type: "LEARN",
@@ -164,20 +228,42 @@ const HomeScreen = ({ navigation }) => {
         availability: "",
         preferredFormat: "ONLINE",
       });
-
-      // Background real refresh
       setTimeout(() => fetchSkills(true), 1000);
     } catch (err) {
       console.error(err);
       alert(err.message || "Failed to create skill");
-      // Revert optimistic update
       setPosts((prev) => prev.filter((p) => p.id !== newSkill.id));
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Rest of your renderPost and UI remains the same
+  // ==================== RENDER NOTIFICATION ====================
+  const renderNotification = ({ item }) => (
+    <Surface style={styles.notifCard} elevation={2}>
+      <View style={styles.notifContent}>
+        <View style={styles.notifHeader}>
+          <Ionicons
+            name={item.type === "NEW_MATCH" ? "handshake" : "notifications"}
+            size={24}
+            color="#4f46e5"
+          />
+          <Text style={styles.notifTitle}>{item.title}</Text>
+          {!item.isRead && <View style={styles.unreadDot} />}
+        </View>
+        <Text style={styles.notifBody}>{item.body}</Text>
+        <Text style={styles.notifTime}>
+          {new Date(item.createdAt).toLocaleDateString()} •{" "}
+          {new Date(item.createdAt).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </Text>
+      </View>
+    </Surface>
+  );
+
+  // ==================== RENDER SKILL POST ====================
   const renderPost = ({ item }) => (
     <TouchableOpacity
       activeOpacity={0.9}
@@ -254,16 +340,31 @@ const HomeScreen = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
+      {/* Header with Notification Icon */}
       <View style={styles.topHeader}>
         <Text style={styles.appTitle}>SkillSWap</Text>
-        <Searchbar
-          placeholder="Search skills, teachers..."
-          onChangeText={setSearchQuery}
-          value={searchQuery}
-          style={styles.searchbar}
-          iconColor="#4f46e5"
-        />
+        <TouchableOpacity
+          style={styles.notifIconContainer}
+          onPress={() => setNotificationModalVisible(true)}
+        >
+          <Ionicons name="notifications-outline" size={28} color="#1e2937" />
+          {unreadCount > 0 && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
       </View>
+
+      <Searchbar
+        placeholder="Search skills, teachers..."
+        onChangeText={setSearchQuery}
+        value={searchQuery}
+        style={styles.searchbar}
+        iconColor="#4f46e5"
+      />
 
       <TouchableOpacity
         style={styles.mySkillsQuickBtn}
@@ -333,7 +434,46 @@ const HomeScreen = ({ navigation }) => {
         onPress={() => setModalVisible(true)}
       />
 
-      {/* Modal remains unchanged */}
+      {/* ==================== NOTIFICATIONS MODAL ==================== */}
+      <Modal
+        visible={notificationModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setNotificationModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.notifModalContent}>
+            <View style={styles.notifModalHeader}>
+              <Text style={styles.modalTitle}>Notifications</Text>
+              {unreadCount > 0 && (
+                <Button mode="text" textColor="#4f46e5" onPress={markAllAsRead}>
+                  Mark all read
+                </Button>
+              )}
+              <TouchableOpacity
+                onPress={() => setNotificationModalVisible(false)}
+              >
+                <Ionicons name="close" size={28} color="#64748b" />
+              </TouchableOpacity>
+            </View>
+
+            {notifLoading && notifications.length === 0 ? (
+              <ActivityIndicator style={{ marginTop: 50 }} color="#4f46e5" />
+            ) : (
+              <FlatList
+                data={notifications}
+                keyExtractor={(item) => item.id}
+                renderItem={renderNotification}
+                ListEmptyComponent={
+                  <Text style={styles.noNotifText}>No notifications yet</Text>
+                }
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* ==================== CREATE SKILL MODAL ==================== */}
       <Modal
         visible={modalVisible}
         animationType="slide"
@@ -343,9 +483,8 @@ const HomeScreen = ({ navigation }) => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Create New Skill</Text>
-
             <ScrollView showsVerticalScrollIndicator={false}>
-              {/* Form fields - same as before */}
+              {/* Form fields here - same as before */}
               <Text style={styles.label}>Type</Text>
               <View style={styles.typeSelector}>
                 {["LEARN", "TEACH"].map((t) => (
@@ -475,7 +614,6 @@ const HomeScreen = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  // Paste all your previous styles here (including modal styles)
   container: { flex: 1, backgroundColor: "#f8fafc" },
   centerContainer: {
     flex: 1,
@@ -483,27 +621,45 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#f8fafc",
   },
+
   topHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     padding: 20,
     backgroundColor: "white",
     borderBottomWidth: 1,
     borderBottomColor: "#e2e8f0",
   },
-  appTitle: {
-    fontSize: 28,
-    fontWeight: "700",
-    color: "#4f46e5",
-    marginBottom: 16,
-  },
-  searchbar: { borderRadius: 12, elevation: 3 },
+  appTitle: { fontSize: 28, fontWeight: "700", color: "#4f46e5" },
 
+  notifIconContainer: { position: "relative", padding: 6 },
+  badge: {
+    position: "absolute",
+    right: 2,
+    top: 2,
+    backgroundColor: "#ef4444",
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 4,
+  },
+  badgeText: { color: "white", fontSize: 11, fontWeight: "bold" },
+
+  searchbar: {
+    borderRadius: 12,
+    elevation: 3,
+    marginHorizontal: 16,
+    marginBottom: 12,
+  },
   mySkillsQuickBtn: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#f0f0ff",
     padding: 16,
     marginHorizontal: 16,
-    marginTop: 12,
     marginBottom: 8,
     borderRadius: 14,
     gap: 12,
@@ -518,11 +674,9 @@ const styles = StyleSheet.create({
   filters: {
     flexDirection: "row",
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 12,
     backgroundColor: "white",
     gap: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#e2e8f0",
   },
   filterBtn: {
     paddingHorizontal: 22,
@@ -554,10 +708,8 @@ const styles = StyleSheet.create({
   userInfo: { flex: 1 },
   name: { fontSize: 17, fontWeight: "700", color: "#1e2937" },
   category: { color: "#64748b", fontSize: 13.5, marginTop: 2 },
-
   typeBadge: { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 20 },
   typeText: { color: "white", fontSize: 13, fontWeight: "700" },
-
   title: {
     fontSize: 20,
     fontWeight: "700",
@@ -566,7 +718,6 @@ const styles = StyleSheet.create({
     lineHeight: 26,
   },
   description: { color: "#475569", lineHeight: 22, marginBottom: 16 },
-
   tags: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   tag: {
     backgroundColor: "#e0e7ff",
@@ -575,43 +726,63 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   tagText: { color: "#4f46e5", fontSize: 13, fontWeight: "500" },
-
   cardActions: { paddingHorizontal: 16, paddingBottom: 16 },
   viewButton: { borderRadius: 12 },
 
-  emptyContainer: {
+  // Notification Styles
+  notifCard: {
+    marginHorizontal: 16,
+    marginVertical: 8,
+    borderRadius: 16,
+    backgroundColor: "white",
+  },
+  notifContent: { padding: 16 },
+  notifHeader: { flexDirection: "row", alignItems: "center", marginBottom: 8 },
+  notifTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#1e2937",
+    marginLeft: 10,
     flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingTop: 100,
   },
-  emptyText: {
-    fontSize: 17,
-    color: "#64748b",
-    textAlign: "center",
-    paddingHorizontal: 30,
+  unreadDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#ef4444",
   },
-  loadingText: { marginTop: 16, color: "#4f46e5", fontSize: 16 },
+  notifBody: { fontSize: 15, color: "#475569", lineHeight: 22 },
+  notifTime: { fontSize: 12, color: "#94a3b8", marginTop: 8 },
 
-  fab: {
-    position: "absolute",
-    margin: 16,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "#4f46e5",
-  },
-
+  // Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.6)",
-    justifyContent: "center",
-    padding: 16,
+    justifyContent: "flex-end",
   },
+  notifModalContent: {
+    backgroundColor: "white",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    flex: 1,
+    paddingTop: 10,
+  },
+  notifModalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e2e8f0",
+  },
+
   modalContent: {
     backgroundColor: "white",
-    borderRadius: 20,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    flex: 1,
     padding: 20,
-    maxHeight: "85%",
   },
   modalTitle: {
     fontSize: 24,
@@ -649,6 +820,34 @@ const styles = StyleSheet.create({
   typeOptionTextActive: { color: "white" },
   modalButtons: { flexDirection: "row", gap: 12, marginTop: 20 },
   modalBtn: { flex: 1 },
+
+  emptyContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingTop: 100,
+  },
+  emptyText: {
+    fontSize: 17,
+    color: "#64748b",
+    textAlign: "center",
+    paddingHorizontal: 30,
+  },
+  loadingText: { marginTop: 16, color: "#4f46e5", fontSize: 16 },
+  noNotifText: {
+    textAlign: "center",
+    marginTop: 80,
+    color: "#64748b",
+    fontSize: 16,
+  },
+
+  fab: {
+    position: "absolute",
+    margin: 16,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#4f46e5",
+  },
 });
 
 export default HomeScreen;
